@@ -14,16 +14,12 @@ client = docker.Client(base_url='unix://var/run/docker.sock',
 
 container = client.create_container("longtest",
                 "nosetests --with-json --json-file='tests/testMore.json' tests/testMore.py")
+container2 = client.create_container("longtest",
+                "nosetests --with-json --json-file='tests/testLong.json' tests/testLong.py")
                 #nosetests needs full path to output file in this situation, default gives error (why?)
-                #"nosetests tests/testMore.py")
-                #"python3 tests/testMore.py")
 
 client.start(container)
-
-#for log in client.logs(container, stdout=True, stderr=True, stream=True):
-#    print(log)
-
-
+client.start(container2)
 
 #now collect test results
 #various options:
@@ -31,7 +27,7 @@ client.start(container)
 #push files out to somewhere
 #leave them in containers and fish them out afterwards
 
-
+print(client.wait(container2)) #this one takes longer
 print(client.wait(container)) #wait for tests to finish
 
 #http://stackoverflow.com/questions/22683410/docker-python-client-api-copy
@@ -44,13 +40,21 @@ def copy_from_docker(client, container_id, src, dest):
         f.write(file.read())
 
 copy_from_docker(client, container, "/tests/testMore.json", "result.json")
+copy_from_docker(client, container2, "/tests/testLong.json", "result2.json")
 
 results = None
+results2 = None
 
 with open ("result.json") as file:
     results = json.load(file)
 
-for result in results['results']:
+with open ("result2.json") as file:
+    results2 = json.load(file)
+
+mergedResults = results['results']
+mergedResults.extend(results2['results'])
+
+for result in mergedResults:
     print(result['time'])
 
 
