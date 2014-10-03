@@ -12,7 +12,7 @@ class TestLong(unittest.TestCase):
         self.assertTrue(True)
     
     def test_shorttest(self):
-        time.sleep(1)
+        time.sleep(4)
         self.assertTrue(True)
 
 if __name__ == "__main__":
