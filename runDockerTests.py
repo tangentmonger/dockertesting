@@ -1,62 +1,70 @@
 #docker requires sudo, so if using virtualenv, run with e.g.
 #sudo venv/bin/python runDockerTests.py
 
+"""
+Farm out unit tests to Docker containers and collect the results.
+Some assumptions:
+    * the container base image has a straight copy of all the local tests
+    * all tests are in a single test directory (no support for recursion here)
+    * tests all succeed (not examining test results or restarting containers on failure)
+"""
+
+
 import io
 import tarfile
 import os
 import json
+import inspect
 
 import docker
+import nose
 
-client = docker.Client(base_url='unix://var/run/docker.sock', 
-                        #version='1.12',
-                        timeout=10)
+client = docker.Client(base_url='unix://var/run/docker.sock')
+JSON_RESULTS_FILENAME = "result.json"
+TESTS_DIRECTORY = "tests"
+IMAGE_NAME = "longtest"
+JSON_RESULTS_PATH = os.path.join(TESTS_DIRECTORY, JSON_RESULTS_FILENAME)
 
-container = client.create_container("longtest",
-                "nosetests --with-json --json-file='tests/testMore.json' tests/testMore.py")
-container2 = client.create_container("longtest",
-                "nosetests --with-json --json-file='tests/testLong.json' tests/testLong.py")
-                #nosetests needs full path to output file in this situation, default gives error (why?)
+#Use nosetests to find files containing tests
+test_files = []
+nose_test = nose.loader.TestLoader()
+for test_suite in nose_test.loadTestsFromDir(TESTS_DIRECTORY):
+    test_filename = inspect.getfile(test_suite.context)
+    test_files.append(os.path.relpath(test_filename))
 
-client.start(container)
-client.start(container2)
+#Build a container to run each test file
+containers = []
+for test_file in test_files:
+    command = "nosetests --with-json --json-file='%s' %s" % (JSON_RESULTS_PATH, test_file)
+    container = client.create_container(IMAGE_NAME, command)
+    containers.append(container)
 
-#now collect test results
-#various options:
-#using docker data volume feature (?)
-#push files out to somewhere
-#leave them in containers and fish them out afterwards
+#Start containers
+print("Starting %d containers" % len(containers))
+for container in containers:
+    client.start(container)
 
-print(client.wait(container2)) #this one takes longer
-print(client.wait(container)) #wait for tests to finish
+#Wait for all containers to exit
+for container in containers:
+    client.wait(container)
 
-#http://stackoverflow.com/questions/22683410/docker-python-client-api-copy
-def copy_from_docker(client, container_id, src, dest):
-    reply = client.copy(container_id, src)
-    filelike = io.BytesIO(reply.read())
-    tar = tarfile.open(fileobj = filelike)
-    file = tar.extractfile(os.path.basename(src))
-    with open(dest, 'wb') as f:
-        f.write(file.read())
+def collect_results(client, containers):
+    """Fish out and aggregate JSON test results from all containers"""
+    results = []
+    for container in containers:
+        reply = client.copy(container, "%s" % JSON_RESULTS_PATH)
+        filelike = io.BytesIO(reply.read())
+        tar = tarfile.open(fileobj = filelike)
+        result_file = tar.extractfile(os.path.basename(JSON_RESULTS_FILENAME))
+        for line in result_file:
+            #is it safe to assume ascii here?
+            print(json.loads(line.decode("ascii")))
+            results.extend(json.loads(line.decode("ascii"))['results'])
+    return results
 
-copy_from_docker(client, container, "/tests/testMore.json", "result.json")
-copy_from_docker(client, container2, "/tests/testLong.json", "result2.json")
+#Collect aggregated test results
+results = collect_results(client, containers)
 
-results = None
-results2 = None
-
-with open ("result.json") as file:
-    results = json.load(file)
-
-with open ("result2.json") as file:
-    results2 = json.load(file)
-
-mergedResults = results['results']
-mergedResults.extend(results2['results'])
-
-for result in mergedResults:
-    print(result['time'])
-
-
-
+#Have a look
+print([result['time'] for result in results])
 
