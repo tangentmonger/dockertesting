@@ -29,26 +29,23 @@ TESTS_DIRECTORY = "tests"
 IMAGE_NAME = "longtest"
 JSON_RESULTS_PATH = os.path.join(TESTS_DIRECTORY, JSON_RESULTS_FILENAME)
 
-#Use nosetests to find individual test cases
-test_cases = []
+#Use nosetests to find paths to individual tests
+test_paths = []
 nose_test = nose.loader.TestLoader()
 for test_file in nose_test.loadTestsFromDir(TESTS_DIRECTORY):
-    #test_filename = inspect.getfile(test_file.context)
-    for test_suite in test_file:
-        #print(test_suite.context)
-        for test_case in test_suite:
-            address = test_case.address()
+    for test_case in test_file:
+        for test in test_case:
+            address = test.address()
             test_filename = os.path.relpath(address[0])
             test_name = address[2]
     
-    
-            test_cases.append("%s:%s" % (test_filename, test_name))
+            test_paths.append("%s:%s" % (test_filename, test_name))
 
 
-#Build a container to run each test file
+#Build a container to run each individual test
 containers = []
-for test_case in test_cases:
-    command = "nosetests --with-json --json-file='%s' %s" % (JSON_RESULTS_PATH, test_case)
+for test_path in test_paths:
+    command = "nosetests --with-json --json-file='%s' %s" % (JSON_RESULTS_PATH, test_path)
     container = client.create_container(IMAGE_NAME, command)
     containers.append(container)
 
